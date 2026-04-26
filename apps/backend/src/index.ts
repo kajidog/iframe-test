@@ -31,6 +31,12 @@ app.use(
   }),
 );
 
+app.use("*", async (c, next) => {
+  await next();
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Referrer-Policy", "no-referrer");
+});
+
 // 学習用: Origin をログに出す
 app.use("*", async (c, next) => {
   const origin = c.req.header("Origin") ?? "(none)";
