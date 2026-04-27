@@ -41,10 +41,12 @@ pnpm dev   # backend / service-ui / hub を並行起動
 
 ### B. embedded（hub→iframe）フロー
 1. http://hub.localtest.me:5173 を開く
-2. `mock トークンを生成` → `iframe を開く`
+2. `iframe を開く`（事前のトークン生成は不要。子の `service-ui:ready` を受けた時点で hub が新しいトークンを発行する）
 3. service-ui のモードが `embedded-trusted` に変わる
 4. `/api/me` ボタンで `authMethod: "hub-token"` のレスポンスが返る
 5. レスポンスの `requestOrigin` が `http://service.localtest.me:5174` であることを確認
+6. iframe を閉じて再度開く、もしくは iframe 内で `location.reload()` した場合も、
+   子が ready を再送するため hub が新しい `iat/exp` のトークンを自動で配る
 
 ### C. 不正な親からの埋め込みを拒否
 - service-ui は dev server で `Content-Security-Policy: frame-ancestors` を返すため、
@@ -84,15 +86,17 @@ sequenceDiagram
   participant S as service-ui (iframe)<br/>(service.localtest.me:5174)
   participant B as backend<br/>(api.localtest.me:8787)
 
-  U->>H: hub を開く<br/>serviceId / appId / hubToken を入力
+  U->>H: hub を開く<br/>serviceId / appId を入力
   U->>H: iframe を開く
   H->>S: iframe.src ロード
   S->>S: isEmbedded=true → embedded-untrusted
-  H->>S: postMessage(hub:init, targetOrigin=service-ui)<br/>※ack まで200msで再送
+  S->>H: postMessage(service-ui:ready, targetOrigin=hub)<br/>※listener 登録直後に送信、mount のたびに再送
+  H->>H: event.origin / source(===iframe.contentWindow) 検証
+  H->>H: makeMockHubToken() で新しい iat/exp のトークン発行
+  H->>S: postMessage(hub:init, targetOrigin=service-ui)<br/>※1 回のみ
   S->>S: event.origin / source / type / payload 検証
   S->>S: 検証 OK → embedded-trusted
   S->>H: postMessage(service-ui:ack, targetOrigin=hub)
-  H->>H: origin/source 検証 → 再送停止
   U->>S: /api/me ボタン
   S->>B: GET /api/me<br/>Authorization: Bearer hubToken<br/>X-Service-Id, X-App-Id
   B->>B: payload デコード + serviceId 整合性チェック

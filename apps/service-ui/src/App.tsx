@@ -4,6 +4,7 @@ import {
   getAllowedParentOrigins,
   isHubInitMessage,
   type ServiceUiAckMessage,
+  type ServiceUiReadyMessage,
 } from "./handshake";
 import { callApi, type ApiCallResult, type AuthInput } from "./api";
 
@@ -69,6 +70,18 @@ export function App() {
       (event.source as Window).postMessage(ack, event.origin);
     };
     window.addEventListener("message", onMessage);
+
+    // listener 登録後に親へ ready を送り、トークン送信を要求する。
+    // mount のたびに送るため iframe リロードでも自動で再ハンドシェイクされる。
+    const ready: ServiceUiReadyMessage = {
+      type: "service-ui:ready",
+      protocolVersion: 1,
+    };
+    for (const origin of allowedParents) {
+      window.parent.postMessage(ready, origin);
+      log(`service-ui:ready を ${origin} に送信`);
+    }
+
     return () => window.removeEventListener("message", onMessage);
   }, [embedded, allowedParents]);
 
