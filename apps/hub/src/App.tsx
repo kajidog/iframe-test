@@ -44,12 +44,38 @@ export function App() {
       [`[${new Date().toLocaleTimeString()}] ${line}`, ...prev].slice(0, 30),
     );
 
-  // service-ui からの ack を受信
+  // service-ui からの ready / ack を受信。
+  // ready を受けたらその場で新しいトークンを生成し hub:init を 1 回だけ送る。
+  // 子は mount のたびに ready を送るので、iframe リロードでも自動で再送される。
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== SERVICE_UI_ORIGIN) return;
+      // event.source が自分の iframe であることを必ず検証する。
+      // 別 window から ready を偽装されてトークンを吐かないため。
       if (event.source !== iframeRef.current?.contentWindow) return;
+
       const data = event.data as { type?: string; receivedAt?: number };
+
+      if (data?.type === "service-ui:ready") {
+        if (!serviceId) {
+          log("ready 受信したが serviceId が空のため hub:init を送らない");
+          return;
+        }
+        const freshToken = makeMockHubToken(serviceId, appId || undefined);
+        setHubToken(freshToken);
+        const payload: HubInitPayload = {
+          serviceId,
+          appId: appId || undefined,
+          hubToken: freshToken,
+        };
+        (event.source as Window).postMessage(
+          { type: "hub:init", payload },
+          SERVICE_UI_ORIGIN,
+        );
+        log(`service-ui:ready 受信 → hub:init 送信 (新規トークン発行)`);
+        return;
+      }
+
       if (data?.type === "service-ui:ack") {
         log(`service-ui:ack を受信 (receivedAt=${data.receivedAt})`);
         setAck({ receivedAt: data.receivedAt ?? Date.now() });
@@ -57,56 +83,17 @@ export function App() {
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
-
-  // hub:init を ack 受信まで再送（ESM の遅延対策）
-  useEffect(() => {
-    if (!opened || !iframeLoaded) return;
-    if (ack) return;
-    if (!hubToken) {
-      log("hubToken が空のため送信をスキップ");
-      return;
-    }
-    let cancelled = false;
-    let attempt = 0;
-    const max = 10;
-
-    const send = () => {
-      if (cancelled || ack) return;
-      if (attempt >= max) {
-        log(
-          `ack 未受信: iframe 側が描画できていないか、CSP(frame-ancestors) / 親 origin 不一致の可能性あり (parent=${window.location.origin})`,
-        );
-        return;
-      }
-      const payload: HubInitPayload = {
-        serviceId,
-        appId: appId || undefined,
-        hubToken,
-      };
-      iframeRef.current?.contentWindow?.postMessage(
-        { type: "hub:init", payload },
-        SERVICE_UI_ORIGIN,
-      );
-      attempt += 1;
-      log(`hub:init 送信 (attempt=${attempt})`);
-      setTimeout(send, 200);
-    };
-    send();
-    return () => {
-      cancelled = true;
-    };
-  }, [opened, iframeLoaded, ack, serviceId, appId, hubToken]);
+  }, [serviceId, appId]);
 
   const onOpen = () => {
-    if (!serviceId || !hubToken) {
-      log("serviceId と hubToken は必須");
+    if (!serviceId) {
+      log("serviceId は必須");
       return;
     }
     setAck(null);
     setIframeLoaded(false);
     setOpened(true);
-    log("iframe を開く");
+    log("iframe を開く (子の ready 受信を待機)");
   };
 
   const onClose = () => {

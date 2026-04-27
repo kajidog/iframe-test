@@ -12,6 +12,11 @@ export type ServiceUiAckMessage = {
   receivedAt: number;
 };
 
+export type ServiceUiReadyMessage = {
+  type: "service-ui:ready";
+  protocolVersion: 1;
+};
+
 export function getAllowedParentOrigins(): string[] {
   const raw = (import.meta.env.VITE_ALLOWED_PARENT_ORIGINS as string | undefined) ?? "";
   return raw
